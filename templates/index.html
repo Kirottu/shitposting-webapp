@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shitposting!</title>
+
+  <link rel="stylesheet" href="/static/style.css">
+
+  <script src="https://unpkg.com/htmx.org@1.9.5"></script>
+  <!-- Load OvenPlayer via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/ovenplayer/dist/ovenplayer.js"></script>
+</head>
+
+<body class="fade_in">
+  <button hx-get="/join" hx-target="body">Join session</button>
+  <button hx-get="/host" hx-target="body">Host session</button>
+</body>
