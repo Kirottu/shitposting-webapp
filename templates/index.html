@@ -9,12 +9,17 @@
 
   <link rel="stylesheet" href="/static/style.css">
 
-  <script src="https://unpkg.com/htmx.org@1.9.5"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.6"></script>
   <!-- Load OvenPlayer via CDN -->
   <script src="https://cdn.jsdelivr.net/npm/ovenplayer/dist/ovenplayer.js"></script>
 </head>
 
-<body class="fade_in">
-  <button hx-get="/join" hx-target="body">Join session</button>
-  <button hx-get="/host" hx-target="body">Host session</button>
+<body>
+  <div class="fade_in centered">
+    <form id="session" hx-get="/join" hx-target="body">
+      <input type="text" placeholder="Session ID" name="session"><br>
+    </form>
+    <button class="btn green_btn" hx-get="/join" hx-include="#session" hx-target="body">Join session</button><br>
+    <button class="btn green_btn" hx-get="/host" hx-include="#session" hx-target="body">Host session</button>
+  </div>
 </body>

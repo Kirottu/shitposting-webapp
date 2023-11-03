@@ -3,18 +3,15 @@ use std::fs;
 use actix::Actor;
 use actix_files::Files;
 use actix_web::{body::BoxBody, web::Data, App, HttpResponse, HttpServer, Responder};
-use serde::{de::Visitor, Deserialize};
+use serde::Deserialize;
 use session::SessionManager;
 
 mod player;
 mod session;
 
-const VALID_FILETYPES: &[&str] = &["mkv", "mp4", "MP4", "webm"];
-
 #[derive(Deserialize)]
 struct Config {
-    host: String,
-    shitposts: String,
+    shitposts: Vec<String>,
     bind: String,
 }
 
@@ -22,46 +19,6 @@ struct Config {
 pub struct Shitpost {
     title: String,
     url: String,
-}
-
-#[derive(Deserialize)]
-struct SessionConfig {
-    amount: usize,
-    session: String,
-}
-
-struct RouletteFolders(Vec<String>);
-
-impl<'de> Deserialize<'de> for RouletteFolders {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct FieldVisitor;
-
-        impl<'de> Visitor<'de> for FieldVisitor {
-            type Value = RouletteFolders;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("folders")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::MapAccess<'de>,
-            {
-                let mut folders = Vec::new();
-
-                while let Some(key) = map.next_key::<&str>()? {
-                    if key == "folders" {
-                        folders.push(map.next_value::<String>()?);
-                    }
-                }
-                Ok(RouletteFolders(folders))
-            }
-        }
-        deserializer.deserialize_identifier(FieldVisitor)
-    }
 }
 
 struct Html(String);
@@ -88,17 +45,23 @@ async fn main() {
     let manager = Data::new(SessionManager::new().start());
 
     HttpServer::new(move || {
-        App::new()
+        let mut app = App::new()
             .service(player::host)
             .service(player::host_submit)
             .service(player::join)
-            .service(player::join_submit)
             .service(player::index)
             .service(player::socket)
             .service(Files::new("/static", "./static"))
-            .service(Files::new("/shitposts", &config.shitposts))
             .app_data(manager.clone())
-            .app_data(config.clone())
+            .app_data(config.clone());
+
+        for folder in &config.shitposts {
+            app = app.service(Files::new(
+                &format!("/shitposts/{}", folder.split('/').last().unwrap()),
+                folder,
+            ));
+        }
+        app
     })
     .bind(bind)
     .unwrap()

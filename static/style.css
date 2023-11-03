@@ -21,6 +21,7 @@ body {
   border: none;
   padding: 10px;
   border-radius: 5px;
+  margin-bottom: 10px;
 }
 
 .green_btn {
@@ -46,6 +47,53 @@ body {
   }
 }
 
-input {
+input[type=text],
+input[type=number] {
+  appearance: textfield;
+  padding: 5px;
   margin-bottom: 10px;
+  margin-top: 10px;
+  background-color: black;
+  border: 2px solid darkgreen;
+  border-radius: 5px;
+  color: white;
+}
+
+input[type=text]:focus,
+input[type=number]:focus {
+  border: 2px solid green;
+  outline: 2px solid darkgreen;
+}
+
+input[type=checkbox] {
+  display: none;
+}
+
+input[type=checkbox]+label {
+  background-color: #222222;
+  width: 100%;
+  text-align: center;
+  padding: 5px;
+  border-radius: 5px;
+  margin-bottom: 10px;
+  user-select: none;
+}
+
+input[type=checkbox]:checked+label {
+  background-color: darkgreen;
+}
+
+input[type=checkbox]:hover:not(:checked)+label {
+  background-color: #333333;
+}
+
+input[type=checkbox]:hover:checked+label {
+  background-color: green;
+}
+
+form {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
 }

@@ -1,4 +1,7 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::Arc,
+};
 
 use actix::{Actor, Addr, Context, Handler, Message, MessageResponse};
 
@@ -10,7 +13,7 @@ use crate::{
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct StateChanged {
-    pub session: String,
+    pub session: Arc<str>,
     pub state: player::State,
 }
 
@@ -23,42 +26,42 @@ pub struct Seeked {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct PlaylistChanged {
-    pub session: String,
+    pub session: Arc<str>,
     pub index: usize,
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Position {
-    pub session: String,
+    pub session: Arc<str>,
     pub position: f64,
 }
 
 #[derive(Message)]
 #[rtype(result = "bool")]
 pub struct NewSession {
-    pub session: String,
+    pub session: Arc<str>,
     pub shitposts: Vec<Shitpost>,
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct PlayerConnect {
-    pub session: String,
+    pub session: Arc<str>,
     pub player: Addr<PlayerActor>,
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct PlayerDisconnect {
-    pub session: String,
+    pub session: Arc<str>,
     pub player: Addr<PlayerActor>,
 }
 
 #[derive(Message)]
 #[rtype(result = "Option<Session>")]
 pub struct GetSession {
-    pub session: String,
+    pub session: Arc<str>,
 }
 
 #[derive(MessageResponse, Clone)]
@@ -70,7 +73,7 @@ pub struct Session {
 }
 
 pub struct SessionManager {
-    sessions: HashMap<String, Session>,
+    sessions: HashMap<Arc<str>, Session>,
 }
 
 impl SessionManager {
@@ -90,7 +93,8 @@ impl Handler<NewSession> for SessionManager {
 
     /// Returns false if the session already exists
     fn handle(&mut self, msg: NewSession, ctx: &mut Self::Context) -> Self::Result {
-        if let Entry::Vacant(e) = self.sessions.entry(msg.session) {
+        if let Entry::Vacant(e) = self.sessions.entry(msg.session.clone()) {
+            tracing::info!(r#"Created session "{}""#, msg.session);
             e.insert(Session {
                 shitposts: msg.shitposts,
                 state: player::State::Paused,

@@ -1,8 +1,7 @@
 <div class="fade_in centered">
-  <form hx-get="/host/submit" hx-target="body" hx-swap="innerHTML">
-    <input type="text" placeholder="Session ID" name="session"><br>
-    <input type="number" id="amount" name="amount">
+  <form hx-get="/host/submit?session={{ session }}" hx-target="body" hx-swap="innerHTML">
     <label for="amount">Amount</label><br>
+    <input type="number" id="amount" name="amount" value="100">
     {% for folder in folders %}
     <input type="checkbox" id="{{ folder }}" name="folders" value="{{ folder }}">
     <label for="{{ folder }}">{{ folder }}</label><br>

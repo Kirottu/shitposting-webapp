@@ -1,5 +1,6 @@
 use std::{
     fs,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -12,11 +13,11 @@ use actix_web::{
 use actix_web_actors::ws;
 use askama::Template;
 use rand::seq::SliceRandom;
-use serde::{Deserialize, Serialize};
+use serde::{de::Visitor, Deserialize, Serialize};
 
 use crate::{
     session::{self, SessionManager},
-    Config, Html, RouletteFolders, SessionConfig, Shitpost, VALID_FILETYPES,
+    Config, Html, Shitpost,
 };
 
 mod templates {
@@ -34,7 +35,8 @@ mod templates {
     #[derive(Template)]
     #[template(path = "host.html")]
     pub struct Host<'a> {
-        pub folders: &'a [String],
+        pub folders: &'a [&'a str],
+        pub session: &'a str,
     }
 
     #[derive(Template)]
@@ -49,6 +51,47 @@ mod templates {
     #[template(path = "error.html")]
     pub struct Error<'a> {
         pub text: &'a str,
+    }
+}
+const VALID_FILETYPES: &[&str] = &["mp4", "MP4", "webm"];
+
+#[derive(Deserialize)]
+struct SessionConfig {
+    amount: usize,
+    session: String,
+}
+
+struct RouletteFolders(Vec<String>);
+
+impl<'de> Deserialize<'de> for RouletteFolders {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct FieldVisitor;
+
+        impl<'de> Visitor<'de> for FieldVisitor {
+            type Value = RouletteFolders;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("folders")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut folders = Vec::new();
+
+                while let Some(key) = map.next_key::<&str>()? {
+                    if key == "folders" {
+                        folders.push(map.next_value::<String>()?);
+                    }
+                }
+                Ok(RouletteFolders(folders))
+            }
+        }
+        deserializer.deserialize_identifier(FieldVisitor)
     }
 }
 
@@ -116,7 +159,7 @@ pub struct SyncPosition;
 
 pub struct PlayerActor {
     manager: Addr<SessionManager>,
-    session: String,
+    session: Arc<str>,
     hb: Instant,
 }
 
@@ -124,7 +167,7 @@ impl PlayerActor {
     const INTERVAL: Duration = Duration::from_secs(1);
     const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
-    fn new(manager: Addr<SessionManager>, session: String) -> Self {
+    fn new(manager: Addr<SessionManager>, session: Arc<str>) -> Self {
         Self {
             manager,
             session,
@@ -149,6 +192,13 @@ impl Actor for PlayerActor {
     fn started(&mut self, ctx: &mut Self::Context) {
         self.hb(ctx);
         self.manager.do_send(session::PlayerConnect {
+            session: self.session.clone(),
+            player: ctx.address(),
+        });
+    }
+
+    fn stopped(&mut self, ctx: &mut Self::Context) {
+        self.manager.do_send(session::PlayerDisconnect {
             session: self.session.clone(),
             player: ctx.address(),
         });
@@ -234,52 +284,49 @@ async fn socket(
     payload: Payload,
 ) -> Result<HttpResponse> {
     ws::start(
-        PlayerActor::new(manager.get_ref().clone(), session.session.clone()),
+        PlayerActor::new(manager.get_ref().clone(), session.session.clone().into()),
         &req,
         payload,
     )
 }
 
 #[get("/join")]
-async fn join() -> Html {
-    Html(templates::Join.render().unwrap())
-}
-
-#[get("/join/submit")]
-async fn join_submit(manager: Data<Addr<SessionManager>>, query: Query<SessionQuery>) -> Html {
-    let session = manager
+async fn join(manager: Data<Addr<SessionManager>>, query: Query<SessionQuery>) -> Html {
+    match manager
         .send(session::GetSession {
-            session: query.session.clone(),
+            session: query.session.clone().into(),
         })
         .await
         .unwrap()
-        .unwrap();
-
-    Html(
-        templates::Player {
-            shitposts: &session.shitposts,
-            session: &query.session,
-        }
-        .render()
-        .unwrap(),
-    )
+    {
+        Some(session) => Html(
+            templates::Player {
+                shitposts: &session.shitposts,
+                session: &query.session,
+            }
+            .render()
+            .unwrap(),
+        ),
+        None => Html(
+            templates::Error {
+                text: "No such session exists",
+            }
+            .render()
+            .unwrap(),
+        ),
+    }
 }
 
 #[get("/host")]
-async fn host(config: Data<Config>) -> Html {
+async fn host(config: Data<Config>, session: Query<SessionQuery>) -> Html {
     Html(
         templates::Host {
-            folders: &fs::read_dir(&config.shitposts)
-                .unwrap()
-                .filter_map(|entry| {
-                    let entry = entry.unwrap();
-                    if entry.file_type().unwrap().is_dir() {
-                        Some(entry.file_name().to_string_lossy().to_string())
-                    } else {
-                        None
-                    }
-                })
+            folders: &config
+                .shitposts
+                .iter()
+                .map(|folder| folder.split('/').last().unwrap())
                 .collect::<Vec<_>>(),
+            session: &session.session,
         }
         .render()
         .unwrap(),
@@ -293,43 +340,37 @@ async fn host_submit(
     session: Query<SessionConfig>,
     folders: Query<RouletteFolders>,
 ) -> Html {
-    let mut shitposts = fs::read_dir(&config.shitposts)
-        .unwrap()
-        .filter_map(|entry| {
-            let entry = entry.unwrap();
+    let mut shitposts = config
+        .clone()
+        .shitposts
+        .iter()
+        .filter_map(move |folder| {
+            let folder_name = folder.split('/').last().unwrap().to_string();
 
-            let config = config.clone();
+            if folders.0 .0.contains(&folder_name) {
+                Some(
+                    fs::read_dir(folder)
+                        .unwrap()
+                        .filter_map(move |entry| {
+                            let name = entry.unwrap().file_name().to_string_lossy().to_string();
 
-            if entry.file_type().unwrap().is_dir() {
-                let folder = entry.file_name().to_string_lossy().to_string();
-                if folders.0 .0.contains(&folder) {
-                    return Some(
-                        fs::read_dir(entry.path())
-                            .unwrap()
-                            .filter_map(move |entry| {
-                                let name = entry.unwrap().file_name().to_string_lossy().to_string();
-
-                                if VALID_FILETYPES
-                                    .iter()
-                                    .any(|filetype| name.ends_with(filetype))
-                                {
-                                    Some(Shitpost {
-                                        url: format!(
-                                            "{}/shitposts/{}/{}",
-                                            config.host, folder, name,
-                                        ),
-                                        title: name,
-                                    })
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
+                            if VALID_FILETYPES
+                                .iter()
+                                .any(|filetype| name.ends_with(filetype))
+                            {
+                                Some(Shitpost {
+                                    url: format!("/shitposts/{}/{}", folder_name, name,),
+                                    title: name,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                None
             }
-
-            None
         })
         .flatten()
         .collect::<Vec<_>>();
@@ -340,7 +381,7 @@ async fn host_submit(
 
     if manager
         .send(session::NewSession {
-            session: session.session.to_string(),
+            session: session.session.clone().into(),
             shitposts: shitposts.clone(),
         })
         .await

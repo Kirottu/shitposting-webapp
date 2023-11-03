@@ -6,25 +6,64 @@
   </div>
 
   <script>
-    var oven_player = OvenPlayer.create('player_id', {
-      playlist: [
-        {% for shitpost in shitposts %}
-          {
-        title: "{{ shitpost.title }}",
-        sources: [{
-          file: "{{ shitpost.url }}"
-        }]
-      },
-      {% endfor %}
+    var oven_player = null;
+
+    let protocol = "ws://";
+
+    if (location.protocol === "https:") {
+      protocol = "wss://";
+    }
+
+    var socket = new WebSocket(protocol + location.host + "/player/socket?session={{ session }}");
+
+    function load_oven_player() {
+      if (oven_player != null) {
+        oven_player.remove();
+      }
+
+      oven_player = OvenPlayer.create('player_id', {
+        playlist: [
+          {% for shitpost in shitposts %}
+    {
+          title: "{{ shitpost.title }}",
+          sources: [{
+            file: "{{ shitpost.url }}"
+          }]
+        },
+        {% endfor %}
         ],
     autoStart: true,
-      });
+      showSeekControl: true,
+        playbackRates: [1],
+          title: "Shitposts <3"
+    });
 
+    oven_player.on('seeked', (data) => {
+      socket.send('"Seeked"');
+    });
 
-    var socket = new WebSocket("ws://" + location.host + "/player/socket?session={{ session }}");
+    oven_player.on('playlistChanged', (data) => {
+      socket.send(JSON.stringify({PlaylistChanged: data}))
+    });
+
+    oven_player.on('error', (data) => {
+      socket.send(JSON.stringify({PlaylistChanged: oven_player.getCurrentPlaylist() + 1}));
+      load_oven_player();
+
+    });
+
+    oven_player.on('stateChanged', (data) => {
+      if (data.newstate === "playing") {
+        socket.send(JSON.stringify({Position: oven_player.getPosition()}));
+      }
+
+      socket.send(JSON.stringify({StateChanged: data.newstate}));
+    });
+    }
+
+    load_oven_player();
 
     socket.addEventListener("message", (msg) => {
-      console.log(msg.data);
       let json = JSON.parse(msg.data);
 
       if (msg.data.includes("sync_position")) {
@@ -48,18 +87,6 @@
           oven_player.setCurrentPlaylist(json.change_playlist);
         }
       }
-    });
-
-    oven_player.on('seeked', (data) => {
-      socket.send('"Seeked"');
-    });
-
-    oven_player.on('playlistChanged', (data) => {
-      socket.send(JSON.stringify({PlaylistChanged: data}))
-    });
-
-    oven_player.on('stateChanged', (data) => {
-      socket.send(JSON.stringify({StateChanged: data.newstate}));
     });
   </script>
 </div>
